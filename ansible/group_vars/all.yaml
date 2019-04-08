@@ -1,0 +1,21 @@
+---
+#
+# Global settings
+#
+ansible_connection: network_cli
+ansible_network_os: nxos
+ansible_ssh_common_args: >
+ -o StrictHostKeyChecking=no
+ -o UserKnownHostsFile=/dev/null
+ -o ConnectTimeout=1200
+ -o ServerAliveInterval=5
+ -o ServerAliveCountMax=60
+ -o ProxyCommand="ssh -W %h:%p
+ -q {{ virl_mgmt_lxc_user }}@{{ virl_host }}
+ -p {{ virl_lxc_port }}
+ -o StrictHostKeyChecking=no
+ -o UserKnownHostsFile=/dev/null"
+ansible_connect_timeout: 400
+connect_retry_timeout: 500
+ansible_command_timeout: 200
+buffer_read_timeout: 3

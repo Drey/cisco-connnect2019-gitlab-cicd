@@ -1,0 +1,186 @@
+---
+stages:
+  - validate
+  - configure fabric
+  - configure services
+  - verify
+
+before_script:
+  - pyenv activate connect2019
+  - cd $CI_PROJECT_DIR
+
+Check files syntax:
+  stage: validate
+  tags:
+    - ansible
+  script:
+    - yamllint .
+    - ansible-lint -x 105 ansible/site.yaml
+
+Deploy fabric in testing environment:
+  stage: configure fabric
+  tags:
+    - ansible
+  environment:
+    name: testing
+  only:
+    refs:
+      - merge_requests
+    variables:
+      - $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "testing"
+  except:
+    variables:
+      - $CI_MERGE_REQUEST_LABELS =~ /.*?(services_only|infra_only).*?$/
+  script:
+    - >
+      ansible-playbook -i inventory_testing ansible/site.yaml
+      --extra-vars "ansible_user=$ansible_user
+      ansible_password=$ansible_password
+      virl_mgmt_lxc_user=$virl_mgmt_lxc_user
+      virl_host=$virl_host
+      ansible_python_interpreter=$(pyenv which python)
+      virl_lxc_port=10000"
+      --skip-tags evpn-services
+
+Deploy services in testing environment:
+  stage: configure services
+  tags:
+    - ansible
+  environment:
+    name: testing
+  only:
+    refs:
+      - merge_requests
+    variables:
+      - $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "testing"
+  except:
+    variables:
+      - $CI_MERGE_REQUEST_LABELS =~ /.*?infra_only.*?$/
+  script:
+    - >
+      ansible-playbook -i inventory_testing ansible/site.yaml
+      --extra-vars "ansible_user=$ansible_user
+      ansible_password=$ansible_password
+      virl_mgmt_lxc_user=$virl_mgmt_lxc_user
+      virl_host=$virl_host
+      ansible_python_interpreter=$(pyenv which python)
+      virl_lxc_port=10000" --tags evpn-services
+
+Run Robot verifications for testing environment:
+  stage: verify
+  tags:
+    - ansible
+  environment:
+    name: testing
+  only:
+    refs:
+      - merge_requests
+    variables:
+      - $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "testing"
+  except:
+    variables:
+      - $CI_MERGE_REQUEST_LABELS =~ /.*?infra_only.*?$/
+  script:
+    - export NXOS_TESTBED=$(pwd)/robot/testbed_testing.yaml
+    - export virl_mgmt_lxc_port=10000
+    - >
+      python ./robot/robot-helper.py
+      inventory_testing
+      leafs
+      ansible/group_vars/nxos.yaml
+      ansible/roles/leaf/vars/services.yaml
+    - chmod +x ./robot/run.sh
+    - ./robot/run.sh
+  when: delayed
+  start_in: 2 minutes
+  artifacts:
+    name: "$CI_JOB_NAME-$CI_COMMIT_REF_NAME"
+    paths:
+      - robot/reports/*
+    when: always
+    expire_in: 1 week
+
+Deploy fabric in production environment:
+  stage: configure fabric
+  tags:
+    - ansible
+  environment:
+    name: production
+  only:
+    refs:
+      - merge_requests
+    variables:
+      - $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master"
+  except:
+    variables:
+      - $CI_MERGE_REQUEST_LABELS =~ /.*?(services_only|infra_only).*?$/
+  when: manual
+  script:
+    - >
+      ansible-playbook -i inventory_production ansible/site.yaml
+      --extra-vars "ansible_user=$ansible_user
+      ansible_password=$ansible_password
+      virl_mgmt_lxc_user=$virl_mgmt_lxc_user
+      virl_host=$virl_host
+      ansible_python_interpreter=$(pyenv which python)
+      virl_lxc_port=10001"
+      --skip-tags evpn-services
+
+Deploy services in production environment:
+  stage: configure services
+  tags:
+    - ansible
+  environment:
+    name: production
+  only:
+    refs:
+      - merge_requests
+    variables:
+      - $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master"
+  except:
+    variables:
+      - $CI_MERGE_REQUEST_LABELS =~ /.*?infra_only.*?$/
+  when: manual
+  script:
+    - >
+      ansible-playbook -i inventory_production ansible/site.yaml
+      --extra-vars "ansible_user=$ansible_user
+      ansible_password=$ansible_password
+      virl_mgmt_lxc_user=$virl_mgmt_lxc_user
+      virl_host=$virl_host
+      ansible_python_interpreter=$(pyenv which python)
+      virl_lxc_port=10001"
+      --tags evpn-services
+
+Run Robot verifications for production:
+  stage: verify
+  tags:
+    - ansible
+  environment:
+    name: production
+  when: manual
+  only:
+    refs:
+      - merge_requests
+    variables:
+      - $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master"
+  except:
+    variables:
+      - $CI_MERGE_REQUEST_LABELS =~ /.*?infra_only.*?$/
+  script:
+    - export NXOS_TESTBED=$(pwd)/robot/testbed_production.yaml
+    - export virl_mgmt_lxc_port=10001
+    - >
+      python ./robot/robot-helper.py
+      inventory_production
+      leafs
+      ansible/group_vars/nxos.yaml
+      ansible/roles/leaf/vars/services.yaml
+    - chmod +x ./robot/run.sh
+    - ./robot/run.sh
+  artifacts:
+    name: "$CI_JOB_NAME-$CI_COMMIT_REF_NAME"
+    paths:
+      - robot/reports/*
+    when: always
+    expire_in: 1 week
